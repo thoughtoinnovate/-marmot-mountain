@@ -18,10 +18,12 @@ export { Scene } from './scene/Scene'
 export {
   createBox,
   createCylinder,
+  createFeather,
   createGround,
   createMountain,
   createOctahedron,
   createSphere,
+  createStar,
   createTorus,
   type Color3,
   type GeometryData,

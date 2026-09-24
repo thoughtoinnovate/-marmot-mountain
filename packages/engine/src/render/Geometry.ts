@@ -181,6 +181,59 @@ export function createOctahedron(radius: number, color: Color3): GeometryData {
   return data
 }
 
+export function createStar(radius: number, innerRadius: number, points: number, thickness: number, color: Color3): GeometryData {
+  const data: GeometryData = { positions: [], normals: [], colors: [] }
+  const outline: Point3[] = []
+  for (let index = 0; index < points * 2; index += 1) {
+    const angle = -Math.PI / 2 + (index / (points * 2)) * Math.PI * 2
+    const pointRadius = index % 2 === 0 ? radius : innerRadius
+    outline.push([Math.cos(angle) * pointRadius, Math.sin(angle) * pointRadius, 0])
+  }
+  const front: Point3 = [0, 0, thickness]
+  const back: Point3 = [0, 0, -thickness]
+  for (let index = 0; index < outline.length; index += 1) {
+    const a = outline[index] ?? [0, 0, 0]
+    const b = outline[(index + 1) % outline.length] ?? [0, 0, 0]
+    addTriangle(data, front, a, b, color)
+    addTriangle(data, back, b, a, variation(color, -0.05))
+    addQuad(
+      data,
+      [a[0], a[1], thickness],
+      [b[0], b[1], thickness],
+      [b[0], b[1], -thickness],
+      [a[0], a[1], -thickness],
+      variation(color, 0.04),
+      variation(color, -0.03),
+    )
+  }
+  return data
+}
+
+export function createFeather(length: number, width: number, thickness: number, color: Color3): GeometryData {
+  const data: GeometryData = { positions: [], normals: [], colors: [] }
+  const tip: Point3 = [0, length * 0.55, 0]
+  const upperLeft: Point3 = [-width * 0.5, length * 0.08, 0]
+  const upperRight: Point3 = [width * 0.5, length * 0.08, 0]
+  const lowerLeft: Point3 = [-width * 0.35, -length * 0.28, 0]
+  const lowerRight: Point3 = [width * 0.35, -length * 0.28, 0]
+  const base: Point3 = [0, -length * 0.55, 0]
+  const front: Point3 = [0, -length * 0.04, thickness]
+  const back: Point3 = [0, -length * 0.04, -thickness]
+  addTriangle(data, front, tip, upperRight, color)
+  addTriangle(data, front, upperRight, lowerRight, variation(color, 0.03))
+  addTriangle(data, front, lowerRight, base, variation(color, -0.02))
+  addTriangle(data, front, base, lowerLeft, variation(color, -0.05))
+  addTriangle(data, front, lowerLeft, upperLeft, variation(color, 0.015))
+  addTriangle(data, front, upperLeft, tip, variation(color, 0.02))
+  addTriangle(data, back, upperRight, tip, variation(color, -0.08))
+  addTriangle(data, back, lowerRight, upperRight, variation(color, -0.04))
+  addTriangle(data, back, base, lowerRight, variation(color, -0.07))
+  addTriangle(data, back, lowerLeft, base, variation(color, -0.09))
+  addTriangle(data, back, upperLeft, lowerLeft, variation(color, -0.075))
+  addTriangle(data, back, tip, upperLeft, variation(color, -0.06))
+  return data
+}
+
 export function createTorus(
   majorRadius: number,
   minorRadius: number,
