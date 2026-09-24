@@ -4,13 +4,14 @@ import { EditorApp } from './editor/EditorApp'
 import { GameUI } from './game/GameUI'
 import { MarmotGameScene } from './game/MarmotGameScene'
 import { SampleApp } from './samples/SampleApp'
+import { StoryApp } from './story/StoryApp'
 import './style.css'
 
 interface Runtime {
   destroy: () => void
 }
 
-type LaunchMode = 'game' | 'editor' | 'sample'
+type LaunchMode = 'game' | 'editor' | 'sample' | 'story'
 
 const initialMode = getLaunchMode()
 let runtime: Runtime | null = null
@@ -27,7 +28,9 @@ try {
     ? new EditorApp()
     : initialMode === 'sample'
       ? new SampleApp()
-      : startGame()
+      : initialMode === 'story'
+        ? new StoryApp()
+        : startGame()
   registerSW({ immediate: true })
 } catch (error) {
   const message = error instanceof Error ? error.message : 'The game could not be loaded.'
@@ -72,7 +75,7 @@ function startGame(): Runtime {
 
 function getLaunchMode(): LaunchMode {
   const route = window.location.hash.replace('#', '')
-  return route === 'editor' || route === 'sample' ? route : 'game'
+  return route === 'editor' || route === 'sample' || route === 'story' ? route : 'game'
 }
 
 function showStartupError(message: string): void {
