@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Marmot Mountain</string>
+    <string name="title_activity_main">Marmot Mountain</string>
+    <string name="package_name">com.marmotmountain.game</string>
+    <string name="custom_url_scheme">com.marmotmountain.game</string>
+</resources>
