@@ -43,20 +43,30 @@ uniform sampler2D uShadowMap;
 uniform vec3 uTint;
 uniform vec3 uLightDirection;
 uniform vec3 uLightColor;
+uniform vec3 uAmbientColor;
+uniform vec3 uSkyColor;
 uniform vec3 uCameraPosition;
 uniform vec3 uFogColor;
+uniform vec3 uEmissive;
+uniform float uRoughness;
+uniform float uMetallic;
+uniform float uDetailStrength;
+uniform float uShadowTexel;
 out vec4 outColor;
-float shadowVisibility(vec3 normal) {
+float hash31(vec3 value) {
+  return fract(sin(dot(value, vec3(17.13, 71.71, 39.47))) * 43758.5453);
+}
+float shadowVisibility(vec3 normal, vec3 lightDirection) {
   vec3 projected = vShadowPosition.xyz / vShadowPosition.w;
   projected = projected * 0.5 + 0.5;
   if (projected.x < 0.0 || projected.x > 1.0 || projected.y < 0.0 || projected.y > 1.0 || projected.z > 1.0) {
     return 1.0;
   }
-  float bias = max(0.0007 * (1.0 - dot(normal, normalize(-uLightDirection))), 0.00025);
+  float bias = max(0.0007 * (1.0 - dot(normal, lightDirection)), 0.00025);
   float visibility = 0.0;
   for (int x = -1; x <= 1; x++) {
     for (int y = -1; y <= 1; y++) {
-      float depth = texture(uShadowMap, projected.xy + vec2(float(x), float(y)) / 1536.0).r;
+      float depth = texture(uShadowMap, projected.xy + vec2(float(x), float(y)) * uShadowTexel).r;
       visibility += projected.z - bias <= depth ? 1.0 : 0.0;
     }
   }
@@ -64,11 +74,24 @@ float shadowVisibility(vec3 normal) {
 }
 void main() {
   vec3 normal = normalize(vWorldNormal);
-  float diffuse = max(dot(normal, normalize(-uLightDirection)), 0.0);
-  float lightBand = floor((0.28 + diffuse * 0.72) * 4.0) / 4.0;
-  float visibility = shadowVisibility(normal);
-  float lighting = (0.56 + lightBand * 0.44) * mix(0.42, 1.0, visibility);
-  vec3 color = vColor * uTint * lighting * uLightColor;
+  vec3 lightDirection = normalize(uLightDirection);
+  vec3 viewDirection = normalize(uCameraPosition - vWorldPosition);
+  vec3 halfDirection = normalize(lightDirection + viewDirection);
+  float diffuse = max(dot(normal, lightDirection), 0.0);
+  float visibility = shadowVisibility(normal, lightDirection);
+  float ambient = 0.2 + 0.16 * max(normal.y, 0.0);
+  float lighting = ambient + diffuse * 0.9 * mix(0.34, 1.0, visibility);
+  float roughness = clamp(uRoughness, 0.08, 1.0);
+  float specularPower = mix(112.0, 7.0, roughness);
+  float specular = pow(max(dot(normal, halfDirection), 0.0), specularPower) * (1.0 - roughness) * 0.42;
+  float rim = pow(1.0 - max(dot(normal, viewDirection), 0.0), 3.0) * 0.12;
+  float grain = hash31(floor(vWorldPosition * 17.0));
+  vec3 baseColor = vColor * uTint;
+  baseColor *= 1.0 + (grain - 0.5) * uDetailStrength;
+  vec3 color = baseColor * (uAmbientColor + uLightColor * lighting);
+  color += uLightColor * specular * mix(1.0, 0.4, uMetallic);
+  color += uSkyColor * rim * (1.0 - roughness * 0.45);
+  color += uEmissive;
   float fog = smoothstep(25.0, 46.0, length(vWorldPosition - uCameraPosition));
   color = mix(color, uFogColor, fog * 0.72);
   outColor = vec4(color, 1.0);
@@ -96,8 +119,15 @@ interface MainUniforms {
   tint: WebGLUniformLocation
   lightDirection: WebGLUniformLocation
   lightColor: WebGLUniformLocation
+  ambientColor: WebGLUniformLocation
+  skyColor: WebGLUniformLocation
   cameraPosition: WebGLUniformLocation
   fogColor: WebGLUniformLocation
+  emissive: WebGLUniformLocation
+  roughness: WebGLUniformLocation
+  metallic: WebGLUniformLocation
+  detailStrength: WebGLUniformLocation
+  shadowTexel: WebGLUniformLocation
 }
 
 interface ShadowUniforms {
@@ -108,6 +138,8 @@ interface ShadowUniforms {
 export interface RendererOptions {
   lightDirection?: Vec3
   lightColor?: readonly [number, number, number]
+  ambientColor?: readonly [number, number, number]
+  skyColor?: readonly [number, number, number]
   shadowSize?: number
 }
 
@@ -122,6 +154,8 @@ export class Renderer {
   private readonly shadowSize: number
   private readonly lightDirection: Vec3
   private readonly lightColor: readonly [number, number, number]
+  private readonly ambientColor: readonly [number, number, number]
+  private readonly skyColor: readonly [number, number, number]
   private readonly lightMatrix: Mat4 = createMat4()
   private readonly lightView: Mat4 = createMat4()
   private readonly lightProjection: Mat4 = createMat4()
@@ -130,8 +164,10 @@ export class Renderer {
 
   constructor(gl: WebGL2RenderingContext, options: RendererOptions = {}) {
     this.gl = gl
-    this.lightDirection = (options.lightDirection ?? new Vec3(-0.55, 1, 0.5)).normalize()
+    this.lightDirection = (options.lightDirection ?? new Vec3(-0.45, 0.9, 0.55)).normalize()
     this.lightColor = options.lightColor ?? [1.08, 1.02, 0.9]
+    this.ambientColor = options.ambientColor ?? [0.18, 0.23, 0.28]
+    this.skyColor = options.skyColor ?? [0.26, 0.44, 0.62]
     const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number
     this.shadowSize = Math.min(options.shadowSize ?? 1536, maxTextureSize)
     this.mainProgram = this.createProgram(mainVertexShader, mainFragmentShader)
@@ -145,8 +181,15 @@ export class Renderer {
       tint: this.uniform(this.mainProgram, 'uTint'),
       lightDirection: this.uniform(this.mainProgram, 'uLightDirection'),
       lightColor: this.uniform(this.mainProgram, 'uLightColor'),
+      ambientColor: this.uniform(this.mainProgram, 'uAmbientColor'),
+      skyColor: this.uniform(this.mainProgram, 'uSkyColor'),
       cameraPosition: this.uniform(this.mainProgram, 'uCameraPosition'),
       fogColor: this.uniform(this.mainProgram, 'uFogColor'),
+      emissive: this.uniform(this.mainProgram, 'uEmissive'),
+      roughness: this.uniform(this.mainProgram, 'uRoughness'),
+      metallic: this.uniform(this.mainProgram, 'uMetallic'),
+      detailStrength: this.uniform(this.mainProgram, 'uDetailStrength'),
+      shadowTexel: this.uniform(this.mainProgram, 'uShadowTexel'),
     }
     this.shadowUniforms = {
       model: this.uniform(this.shadowProgram, 'uModel'),
@@ -188,6 +231,7 @@ export class Renderer {
     gl.bindTexture(gl.TEXTURE_2D, null)
     gl.disable(gl.CULL_FACE)
     gl.enable(gl.DEPTH_TEST)
+    gl.enable(gl.DITHER)
     gl.depthFunc(gl.LEQUAL)
   }
 
@@ -207,15 +251,18 @@ export class Renderer {
     const gl = this.gl
     gl.bindFramebuffer(gl.FRAMEBUFFER, null)
     gl.viewport(0, 0, this.width, this.height)
-    gl.clearColor(scene.backgroundColor[0], scene.backgroundColor[1], scene.backgroundColor[2], 1)
+    gl.clearColor(scene.backgroundColor[0], scene.backgroundColor[1], scene.backgroundColor[2], 0)
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
     gl.useProgram(this.mainProgram)
     gl.uniformMatrix4fv(this.mainUniforms.viewProjection, false, scene.camera.viewProjection)
     gl.uniformMatrix4fv(this.mainUniforms.lightMatrix, false, this.lightMatrix)
     gl.uniform3fv(this.mainUniforms.lightDirection, [this.lightDirection.x, this.lightDirection.y, this.lightDirection.z])
     gl.uniform3fv(this.mainUniforms.lightColor, [...this.lightColor])
+    gl.uniform3fv(this.mainUniforms.ambientColor, [...this.ambientColor])
+    gl.uniform3fv(this.mainUniforms.skyColor, [...this.skyColor])
     gl.uniform3f(this.mainUniforms.cameraPosition, scene.camera.position.x, scene.camera.position.y, scene.camera.position.z)
     gl.uniform3fv(this.mainUniforms.fogColor, [...scene.backgroundColor])
+    gl.uniform1f(this.mainUniforms.shadowTexel, 1 / this.shadowSize)
     gl.activeTexture(gl.TEXTURE0)
     gl.bindTexture(gl.TEXTURE_2D, this.shadowTexture)
     gl.uniform1i(this.mainUniforms.shadowMap, 0)
@@ -265,6 +312,10 @@ export class Renderer {
       gl.uniformMatrix4fv(uniforms.model, false, node.worldMatrix)
       gl.uniformMatrix3fv(uniforms.normalMatrix, false, node.normalMatrix)
       gl.uniform3fv(uniforms.tint, [...node.tint])
+      gl.uniform3fv(uniforms.emissive, [...node.emissive])
+      gl.uniform1f(uniforms.roughness, node.roughness)
+      gl.uniform1f(uniforms.metallic, node.metallic)
+      gl.uniform1f(uniforms.detailStrength, node.detailStrength)
       node.mesh.draw()
     }
     for (const child of node.children) {
@@ -274,7 +325,7 @@ export class Renderer {
 
   private updateLightMatrix(): void {
     const center = new Vec3(0, 1, -3)
-    const eye = center.clone().subtract(this.lightDirection.clone().scale(24))
+    const eye = center.clone().add(this.lightDirection.clone().scale(24))
     lookAt(this.lightView, eye, center, Vec3.up())
     orthographic(this.lightProjection, -18, 18, -18, 18, 1, 52)
     multiplyMat4(this.lightMatrix, this.lightProjection, this.lightView)

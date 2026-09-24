@@ -15,6 +15,10 @@ export class Node {
   rotation = new Vec3()
   scale = Vec3.one()
   tint: Color = [1, 1, 1]
+  roughness = 0.78
+  metallic = 0
+  detailStrength = 0.025
+  emissive: Color = [0, 0, 0]
   mesh: Mesh | null = null
   readonly worldMatrix: Mat4 = new Float32Array(16)
   readonly normalMatrix = new Float32Array(9)

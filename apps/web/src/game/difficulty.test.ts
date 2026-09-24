@@ -10,6 +10,13 @@ describe('difficulty', () => {
     expect(late.holdDuration).toBeLessThan(early.holdDuration)
   })
 
+  it('adapts to player skill', () => {
+    const casual = getDifficulty(30, 0.1)
+    const expert = getDifficulty(30, 1)
+    expect(expert.maximumActive).toBeGreaterThanOrEqual(casual.maximumActive)
+    expect(expert.spawnInterval).toBeLessThan(casual.spawnInterval)
+  })
+
   it('awards quick catch and streak bonuses', () => {
     const difficulty = getDifficulty(0)
     expect(calculateCatchPoints(0.1, difficulty, 1)).toBe(15)

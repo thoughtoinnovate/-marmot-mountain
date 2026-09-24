@@ -16,6 +16,13 @@ import {
   calculateCatchPoints,
   getDifficulty,
 } from './difficulty'
+import {
+  chooseHoleIndex,
+  getSkillProfile,
+  getSpawnDelay,
+  rememberHole,
+  type SpawnMemory,
+} from './spawnDirector'
 
 type GameState = 'ready' | 'playing' | 'paused' | 'ended'
 
@@ -47,17 +54,23 @@ export class MarmotGameScene extends Scene {
   private spawnTimer = 0.35
   private ambientTimer = 0.2
   private lastMissAt = -Infinity
+  private roundCatches = 0
+  private roundMisses = 0
+  private spawnMemory: SpawnMemory = { recentHoleIndices: [], lastHoleIndex: null }
   private readonly pointerUnsubscribe: () => void
   private readonly keyUnsubscribe: () => void
 
-  private readonly handleTargetMiss = (): void => {
+  private readonly handleTargetMiss = (_target: MarmotTarget): void => {
     if (this.state === 'playing') {
+      this.roundMisses += 1
       this.combo = 0
     }
   }
 
   private readonly handleTargetFinished = (_target: MarmotTarget): void => {
-    this.ambientTimer = Math.max(0, this.ambientTimer)
+    if (this.state === 'playing') {
+      this.spawnTimer = Math.min(this.spawnTimer, 0.08)
+    }
   }
 
   constructor(
@@ -116,7 +129,7 @@ export class MarmotGameScene extends Scene {
       this.ambientTimer -= deltaTime
       if (this.ambientTimer <= 0) {
         this.ambientTimer = 1.15
-        this.activateRandomTarget(getDifficulty(0))
+        this.activateRandomTarget(getDifficulty(0, 0.25))
       }
     } else if (this.state === 'playing') {
       this.updateRound(deltaTime)
@@ -144,13 +157,14 @@ export class MarmotGameScene extends Scene {
       this.endRound()
       return
     }
-    const difficulty = getDifficulty(this.elapsed)
+    const skill = getSkillProfile(this.roundCatches, this.roundMisses, this.combo)
+    const difficulty = getDifficulty(this.elapsed, skill.pressure)
     this.spawnTimer -= deltaTime
     if (this.spawnTimer <= 0) {
       const activeCount = this.targets.filter((target) => target.active).length
       if (activeCount < difficulty.maximumActive) {
         this.activateRandomTarget(difficulty)
-        this.spawnTimer = difficulty.spawnInterval * (0.82 + Math.random() * 0.36)
+        this.spawnTimer = getSpawnDelay(difficulty.spawnInterval, skill)
       } else {
         this.spawnTimer = 0.12
       }
@@ -176,6 +190,9 @@ export class MarmotGameScene extends Scene {
     this.score = 0
     this.combo = 0
     this.caught = 0
+    this.roundCatches = 0
+    this.roundMisses = 0
+    this.spawnMemory = { recentHoleIndices: [], lastHoleIndex: null }
     this.spawnTimer = 0.14
     for (const target of this.targets) {
       target.finishImmediately()
@@ -185,14 +202,17 @@ export class MarmotGameScene extends Scene {
   }
 
   private activateRandomTarget(difficulty: ReturnType<typeof getDifficulty>): void {
-    const available = this.targets.filter((target) => !target.active)
-    if (available.length === 0) {
+    const availableHoleIndices = this.targets.flatMap((target, index) => target.active ? [] : [index])
+    const holeIndex = chooseHoleIndex(availableHoleIndices, this.spawnMemory)
+    if (holeIndex === null) {
       return
     }
-    const target = available[Math.floor(Math.random() * available.length)]
-    if (target) {
-      target.activate(difficulty)
+    const target = this.targets[holeIndex]
+    if (!target) {
+      return
     }
+    target.activate(difficulty, Math.random())
+    this.spawnMemory = rememberHole(this.spawnMemory, holeIndex)
   }
 
   private handlePointer(pointer: PointerPosition): void {
@@ -221,7 +241,9 @@ export class MarmotGameScene extends Scene {
     if (closest?.catch()) {
       this.combo += 1
       this.caught += 1
-      const difficulty = getDifficulty(this.elapsed)
+      this.roundCatches += 1
+      const skill = getSkillProfile(this.roundCatches, this.roundMisses, this.combo)
+      const difficulty = getDifficulty(this.elapsed, skill.pressure)
       const points = calculateCatchPoints(closest.reactionTime, difficulty, this.combo)
       this.score += points
       closest.hitCenter(center)
@@ -276,6 +298,8 @@ export class MarmotGameScene extends Scene {
   private createEnvironment(): void {
     const ground = new Node('alpine-meadow')
     ground.mesh = this.meshes.ground
+    ground.roughness = 0.98
+    ground.detailStrength = 0.12
     ground.castShadow = false
     this.add(ground)
 
@@ -284,6 +308,8 @@ export class MarmotGameScene extends Scene {
     sun.position.set(-7.5, 10.5, -20)
     sun.scale.set(2.7, 2.7, 0.4)
     sun.tint = [1, 0.78, 0.24]
+    sun.emissive = [0.85, 0.45, 0.08]
+    sun.roughness = 0.1
     sun.castShadow = false
     this.add(sun)
 
@@ -301,6 +327,8 @@ export class MarmotGameScene extends Scene {
       mountain.position.set(x, groundHeight(x, z) - 0.08, z)
       mountain.scale.set(scaleX, scaleY, scaleX * 0.86)
       mountain.tint = [1 + tint, 1, 1 - tint * 0.25]
+      mountain.roughness = 0.92
+      mountain.detailStrength = 0.05
       this.add(mountain)
     }
 
@@ -327,6 +355,8 @@ export class MarmotGameScene extends Scene {
       rock.position.set(x, groundHeight(x, z) + scale * 0.3, z)
       rock.scale.set(scale * 1.4, scale * 0.75, scale)
       rock.rotation.y = Math.random() * Math.PI
+      rock.roughness = 0.98
+      rock.detailStrength = 0.1
       this.add(rock)
     }
 
@@ -344,12 +374,16 @@ export class MarmotGameScene extends Scene {
     dark.mesh = this.meshes.darkHole
     dark.position.set(hole.x, baseY, hole.z)
     dark.scale.set(1.15, 1, 0.92)
+    dark.roughness = 1
+    dark.detailStrength = 0.04
     dark.castShadow = false
     this.add(dark)
     const rim = new Node('dirt-rim')
     rim.mesh = this.meshes.dirtRim
     rim.position.set(hole.x, baseY + 0.065, hole.z)
     rim.scale.set(1.08, 0.75, 0.94)
+    rim.roughness = 0.98
+    rim.detailStrength = 0.1
     this.add(rim)
   }
 
@@ -378,11 +412,15 @@ export class MarmotGameScene extends Scene {
     this.add(group)
     const trunk = new Node('tree-trunk')
     trunk.mesh = this.meshes.treeTrunk
+    trunk.roughness = 0.96
+    trunk.detailStrength = 0.08
     trunk.position.y = height * 0.42
     trunk.scale.set(0.8, height / 1.6, 0.8)
     trunk.setParent(group)
     const top = new Node('tree-top')
     top.mesh = this.meshes.treeTop
+    top.roughness = 0.94
+    top.detailStrength = 0.08
     top.position.y = height * 0.86
     top.scale.set(height * 0.55, height * 0.55, height * 0.55)
     top.rotation.y = rotation * 0.4
@@ -404,6 +442,8 @@ export class MarmotGameScene extends Scene {
       flower.rotation.y = Math.random() * Math.PI
       flower.tint = [0.95, 0.7 + Math.random() * 0.2, 0.25]
       flower.castShadow = false
+      flower.roughness = 0.9
+      flower.detailStrength = 0.04
       this.add(flower)
     }
   }
@@ -417,6 +457,8 @@ export class MarmotGameScene extends Scene {
       const cloud = new Node('cloud')
       cloud.position.set(x, y, z)
       cloud.scale.set(scale * 1.8, scale * 0.65, scale)
+      cloud.roughness = 1
+      cloud.detailStrength = 0
       cloud.castShadow = false
       this.add(cloud)
       for (const [partX, partY, partZ, partScale] of [
@@ -428,6 +470,8 @@ export class MarmotGameScene extends Scene {
         part.mesh = this.meshes.cloud
         part.position.set(partX, partY, partZ)
         part.scale.set(partScale, partScale * 0.7, partScale)
+        part.roughness = 1
+        part.detailStrength = 0
         part.castShadow = false
         part.setParent(cloud)
       }

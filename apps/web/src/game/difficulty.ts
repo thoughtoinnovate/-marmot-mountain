@@ -9,15 +9,16 @@ export interface Difficulty {
   quickCatchSeconds: number
 }
 
-export function getDifficulty(elapsedSeconds: number): Difficulty {
+export function getDifficulty(elapsedSeconds: number, skillPressure = 0.5): Difficulty {
   const progress = Math.max(0, Math.min(1, elapsedSeconds / ROUND_DURATION_SECONDS))
+  const challenge = Math.max(0, Math.min(1, progress * 0.72 + skillPressure * 0.28))
   return {
-    spawnInterval: 0.88 - progress * 0.54,
-    maximumActive: 1 + Math.floor(progress * 3.8),
-    riseDuration: 0.58 - progress * 0.22,
-    holdDuration: 0.78 - progress * 0.38,
-    fallDuration: 0.42 - progress * 0.12,
-    quickCatchSeconds: 0.55 - progress * 0.18,
+    spawnInterval: 0.9 - challenge * 0.62,
+    maximumActive: 1 + Math.floor(challenge * 4.8),
+    riseDuration: 0.62 - challenge * 0.3,
+    holdDuration: 0.84 - challenge * 0.46,
+    fallDuration: 0.46 - challenge * 0.16,
+    quickCatchSeconds: 0.58 - challenge * 0.2,
   }
 }
 

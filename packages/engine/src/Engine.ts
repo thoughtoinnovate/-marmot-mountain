@@ -39,7 +39,7 @@ export class Engine {
     options: EngineOptions = {},
   ) {
     const gl = canvas.getContext('webgl2', {
-      alpha: false,
+      alpha: true,
       antialias: true,
       depth: true,
       powerPreference: 'high-performance',

@@ -20,6 +20,39 @@ function variation(color: Color3, amount: number): Color3 {
   ]
 }
 
+function addTriangleWithNormals(
+  data: GeometryData,
+  a: Point3,
+  b: Point3,
+  c: Point3,
+  normalA: Point3,
+  normalB: Point3,
+  normalC: Point3,
+  color: Color3,
+): void {
+  for (const [point, normal] of [[a, normalA], [b, normalB], [c, normalC]] as const) {
+    data.positions.push(point[0], point[1], point[2])
+    data.normals.push(normal[0], normal[1], normal[2])
+    data.colors.push(clampColor(color[0]), clampColor(color[1]), clampColor(color[2]))
+  }
+}
+
+function addSmoothQuad(
+  data: GeometryData,
+  a: Point3,
+  b: Point3,
+  c: Point3,
+  d: Point3,
+  normalA: Point3,
+  normalB: Point3,
+  normalC: Point3,
+  normalD: Point3,
+  color: Color3,
+): void {
+  addTriangleWithNormals(data, a, b, c, normalA, normalB, normalC, color)
+  addTriangleWithNormals(data, a, c, d, normalA, normalC, normalD, variation(color, 0.012))
+}
+
 function addTriangle(data: GeometryData, a: Point3, b: Point3, c: Point3, color: Color3): void {
   const abx = b[0] - a[0]
   const aby = b[1] - a[1]
@@ -74,28 +107,23 @@ export function createBox(size: Point3, color: Color3): GeometryData {
 
 export function createSphere(radius: number, widthSegments: number, heightSegments: number, color: Color3): GeometryData {
   const data: GeometryData = { positions: [], normals: [], colors: [] }
-  const point = (width: number, height: number): Point3 => {
+  const vertex = (width: number, height: number): readonly [Point3, Point3] => {
     const longitude = (width / widthSegments) * Math.PI * 2
     const latitude = (height / heightSegments) * Math.PI
     const ring = Math.sin(latitude)
+    const normal: Point3 = [Math.cos(longitude) * ring, Math.cos(latitude), Math.sin(longitude) * ring]
     return [
-      Math.cos(longitude) * ring * radius,
-      Math.cos(latitude) * radius,
-      Math.sin(longitude) * ring * radius,
+      [normal[0] * radius, normal[1] * radius, normal[2] * radius],
+      normal,
     ]
   }
   for (let height = 0; height < heightSegments; height += 1) {
     for (let width = 0; width < widthSegments; width += 1) {
-      const shade = ((width + height * 3) % 4) * 0.018
-      addQuad(
-        data,
-        point(width, height),
-        point(width + 1, height),
-        point(width + 1, height + 1),
-        point(width, height + 1),
-        variation(color, shade),
-        variation(color, -shade),
-      )
+      const a = vertex(width, height)
+      const b = vertex(width + 1, height)
+      const c = vertex(width + 1, height + 1)
+      const d = vertex(width, height + 1)
+      addSmoothQuad(data, a[0], b[0], c[0], d[0], a[1], b[1], c[1], d[1], color)
     }
   }
   return data
@@ -198,6 +226,13 @@ export function createGround(
     const z = (depthIndex / depthSegments - 0.5) * depth
     return [x, heightAt(x, z), z]
   }
+  const normalAt = (x: number, z: number): Point3 => {
+    const step = 0.01
+    const slopeX = heightAt(x + step, z) - heightAt(x - step, z)
+    const slopeZ = heightAt(x, z + step) - heightAt(x, z - step)
+    const length = Math.hypot(-slopeX, 1, -slopeZ)
+    return [-slopeX / length, 1 / length, -slopeZ / length]
+  }
   for (let depthIndex = 0; depthIndex < depthSegments; depthIndex += 1) {
     for (let widthIndex = 0; widthIndex < widthSegments; widthIndex += 1) {
       const a = point(widthIndex, depthIndex)
@@ -207,8 +242,8 @@ export function createGround(
       const centerX = (a[0] + c[0]) / 2
       const centerZ = (a[2] + c[2]) / 2
       const color = colorAt(centerX, centerZ)
-      addTriangle(data, a, b, c, color)
-      addTriangle(data, a, c, d, variation(color, 0.018))
+      addTriangleWithNormals(data, a, b, c, normalAt(a[0], a[2]), normalAt(b[0], b[2]), normalAt(c[0], c[2]), color)
+      addTriangleWithNormals(data, a, c, d, normalAt(a[0], a[2]), normalAt(c[0], c[2]), normalAt(d[0], d[2]), variation(color, 0.018))
     }
   }
   return data

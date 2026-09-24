@@ -28,6 +28,11 @@ export class MarmotTarget extends Entity {
   private completed = false
   private updatesEnabled = true
   private baseYaw: number
+  private behaviorSeed = 0
+  private riseDuration = 0
+  private holdDuration = 0
+  private fallDuration = 0
+  private lookSpeed = 1
 
   constructor(
     name: string,
@@ -59,16 +64,22 @@ export class MarmotTarget extends Entity {
     return this.waitingTime
   }
 
-  activate(difficulty: Difficulty): void {
+  activate(difficulty: Difficulty, behaviorSeed = Math.random()): void {
     this.difficulty = difficulty
+    this.behaviorSeed = behaviorSeed
+    this.riseDuration = difficulty.riseDuration * (0.88 + behaviorSeed * 0.24)
+    this.holdDuration = difficulty.holdDuration * (0.82 + behaviorSeed * 0.36)
+    this.fallDuration = difficulty.fallDuration * (0.9 + behaviorSeed * 0.2)
+    this.lookSpeed = 2.2 + behaviorSeed * 2.4
+    this.baseYaw = (behaviorSeed - 0.5) * 0.32
     this.phase = 'rising'
     this.phaseTime = 0
     this.waitingTime = 0
     this.completed = false
     this.visible = true
-    this.position.set(0, -1.4, 0)
+    this.position.y = -1.4
+    this.rotation.set(0, this.baseYaw, 0)
     this.scale.set(1, 1, 1)
-    this.rotation.y = this.baseYaw
   }
 
   catch(): boolean {
@@ -109,7 +120,7 @@ export class MarmotTarget extends Entity {
     }
     this.phaseTime += deltaTime
     if (this.phase === 'rising') {
-      const progress = Math.min(1, this.phaseTime / this.difficulty.riseDuration)
+      const progress = Math.min(1, this.phaseTime / this.riseDuration)
       const eased = easeOutBack(progress)
       this.position.y = -1.4 * (1 - eased)
       if (progress >= 1) {
@@ -120,12 +131,14 @@ export class MarmotTarget extends Entity {
     } else if (this.phase === 'waiting') {
       this.waitingTime += deltaTime
       this.position.y = Math.sin(this.waitingTime * 4.2) * 0.035
-      if (this.waitingTime >= this.difficulty.holdDuration) {
+      this.rotation.y = this.baseYaw + Math.sin(this.waitingTime * this.lookSpeed + this.behaviorSeed * 6.28) * 0.18
+      this.rotation.z = Math.sin(this.waitingTime * 2.1 + this.behaviorSeed * 4) * 0.035
+      if (this.waitingTime >= this.holdDuration) {
         this.phase = 'falling'
         this.phaseTime = 0
       }
     } else if (this.phase === 'falling') {
-      const duration = this.difficulty.fallDuration
+      const duration = this.fallDuration
       const progress = Math.min(1, this.phaseTime / duration)
       this.position.y = -1.4 * easeInCubic(progress)
       if (progress >= 1) {
@@ -150,7 +163,8 @@ export class MarmotTarget extends Entity {
     const wasMiss = this.phase === 'falling'
     this.completed = true
     this.visible = false
-    this.position.set(0, 0, 0)
+    this.position.y = 0
+    this.rotation.set(0, this.baseYaw, 0)
     this.scale.set(1, 1, 1)
     if (wasMiss) {
       this.callbacks.onMiss(this)
@@ -184,6 +198,17 @@ export class MarmotTarget extends Entity {
       part.rotation.set(transform.rotation.x, transform.rotation.y, transform.rotation.z)
     }
     part.castShadow = name !== 'left-glint' && name !== 'right-glint'
+    if (name.includes('glint')) {
+      part.roughness = 0.12
+      part.emissive = [0.6, 0.54, 0.3]
+      part.detailStrength = 0
+    } else if (name.includes('eye') || name === 'nose' || name === 'tooth') {
+      part.roughness = name === 'tooth' ? 0.32 : 0.2
+      part.detailStrength = 0.01
+    } else {
+      part.roughness = name.includes('belly') || name.includes('muzzle') ? 0.88 : 0.94
+      part.detailStrength = name.includes('belly') || name.includes('muzzle') ? 0.075 : 0.1
+    }
     part.setParent(this)
   }
 }
